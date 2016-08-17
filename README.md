@@ -1,2 +1,2 @@
 # grasp_dataset_generation
-Tools for generating a dataset of robotic grasps in Graspit.
+This code is currently under active development!  No guarantees are made as to its functionality.
