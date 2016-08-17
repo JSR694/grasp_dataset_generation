@@ -1,0 +1,99 @@
+###############################################################################
+#
+# Generates grasps for a Baxter gripper and a set of models. Stores them in a database.
+#
+# Grasp planning with Graspit, by way of graspit_interface and graspit_commander.
+#   NOTE graspit_interface must be launched externally.
+# Dataset is an HDF5 file, abstracted away by the GraspDataset class.
+#
+# NOTE: Dataset must be created from scratch.  Currently does not support 
+#   editing existing datasets.
+#
+# Author: Jack Rasiel
+#
+# TODO add proper ROS-style header (with license etc.)
+#
+###############################################################################
+
+import rospy
+from os import listdir
+from os.path import splitext
+from graspit_commander.graspit_commander import GraspitCommander as gc
+from graspit_interface.msg import Grasp, Planner
+from grasp_dataset import GraspDataset
+
+
+class InitialGraspDsetBuilder(object):
+    def __init__(self, dset_filepath, dset_config_filepath, model_dir, hand_name):
+        rospy.init_node("initial_dataset_generator")
+        
+        self.hand_name = hand_name
+
+        # Load model names from specified dir.
+        self.model_dir = model_dir
+        self.model_names = []
+        try:
+            # Get all files, remove exts, and remove duplicates:
+            files = os.listdir(model_dir)
+            files = map(lambda f: splitext(f)[0], files)
+            files.sort()
+            self.mode_names = [files[i] for i in range(0, len(files),2)]
+            rospy.ROS_LOG("Successfully loaded %d models." % len(files))
+        except OSError:
+            rospy.ROS_ERROR("Problem loading models from dir %s" % models_dir)
+            return
+
+        # Load dataset from specified dir.
+        self.dset = GraspDataset(dset_filepath, dset_config_filepath)
+        rospy.ROS_LOG("Successfully initialized dataset.")
+        rospy.ROS_LOG("Dataset location:\t%s" % dset_filepath)
+        rospy.ROS_LOG("Dataset config location:\t%s" % dset_config_filepath)
+
+        # Add model names to dset:
+        self.dset.add_models(self.model_names)
+        rospy.ROS_LOG("Added models to dataset.")
+
+        # Set grasp planner parameters.
+        #TODO planner preferences as params?
+        self.planner_type = Planner.SIM_ANN
+        self.planner_max_steps = 100000
+
+        rospy.ROS_LOG("Finished setting up.")
+
+    def generateGrasps(self):
+        for model in self.model_names:
+            ret = self.generateGraspsForModel(model)
+            grasps, energies = ret.grasps, ret.energies
+            
+            self.storeGraspsForModel(self, grasps, energies)
+
+        # For each model:
+        #   Load
+        #   gc.planGrasps(params)  MULTIPLE TIMES???
+        #   dset.add_initial_grasps(grasps)
+    
+    # Plan grasps for one model.  Returns a response object w/ grasps,
+    #   energies, and search energies.
+    def generateGraspsForModel(self, model_name):
+        rospy.ROS_LOG("Generating grasps for model %s." % model_name)
+        rospy.ROS_LOG("Setting up world.")
+        gc.clearWorld()
+        gc.importRobot(self.hand_name)
+        gc.importGraspableBody(model_name)
+
+        rospy.ROS_LOG("Running planner.")
+        response = gc.planGrasps(planner=self.planner_type, 
+                                 max_steps=self.planner_max_steps)
+        return response
+        
+    # Stores grasps+grasp energies in the dataset.
+    def self.storeGraspsForModel(self, grasps, energies):
+
+
+
+
+# TEST dset:
+#   For a bunch of models, grasps:
+#       dset.get_grasps
+#       Convert to gc grasp.
+#       gc.showGrasps

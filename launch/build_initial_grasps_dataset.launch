@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="ISO-8859-15"?>
+
+<launch>
+    <include file="$(find graspit_interface)/launch/graspit_interface.launch"/>
+    <node pkg="grasp_dataset_generation" type="build_initial_grasp_dataset.py" name="dataset_builder" output="screen"/>
+</launch>
