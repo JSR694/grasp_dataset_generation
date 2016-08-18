@@ -85,15 +85,15 @@ class InitialGraspDsetBuilder(object):
 
         rospy.loginfo("Finished setting up.")
 
-    def generateGraspsNextModel(self):
-        return self.generateGraspsOneModel(
+    def generateGraspNextModel(self):
+        return self.generateGraspOneModel(
             self.dset.get_current_model_name())
 
-    def generateGraspsOneModel(self, model):
+    def generateGraspOneModel(self, model):
         rospy.wait_for_service("clearWorld")
         try: 
             rospy.loginfo("Generating grasps for %s" % model)
-            ret = self.generateGrasps_helper(model)
+            ret = self.generateGrasp_helper(model)
             grasps, energies = ret.grasps, ret.energies
 
             rospy.loginfo("Storing grasps in dataset.")
@@ -104,12 +104,12 @@ class InitialGraspDsetBuilder(object):
             rospy.logerr("Please ensure that graspit_interface is running.")
 
     # TODO this is broken bc Graspit will always segfault:
-    def generateGraspsAllModels(self):
+    def generateGraspAllModels(self):
         rospy.wait_for_service("clearWorld")
         try: 
             for model in self.model_names:
                 print self.model_names
-                ret = self.generateGrasps_helper(model)
+                ret = self.generateGrasp_helper(model)
                 if ret is None: return # if grasp planning fails
                 grasps, energies = ret.grasps, ret.energies
 
@@ -120,9 +120,9 @@ class InitialGraspDsetBuilder(object):
             rospy.logerr("Graspit commander timed out.  No grasps planned.")
             rospy.logerr("Please ensure that graspit_interface is running.")
 
-    # Helper for generateGrasps. Plan grasps for one model.  
+    # Helper for generateGrasp. Plan grasps for one model.  
     #  Returns a response object w/ grasps, energies, and search energies.
-    def generateGrasps_helper(self, model_name):
+    def generateGrasp_helper(self, model_name):
         if self.models_subdir is not None:
             model_name = self.models_subdir + "/" + model_name
         rospy.loginfo("Generating grasps for model %s" % model_name)
@@ -165,10 +165,11 @@ class TableGraspDsetBuilder(object):
         # Load dataset from specified dir.
         self.dset = GraspDataset(dset_filepath, dset_config_filepath, 
                                  dset_must_exist = True)
-        self.dset.set_tgrasp_mode() # TODO hacky way to reset index counters.
-        self.dset_iter = self.dset.iterator() # initial_grasps iterator
-        rospy.on_shutdown(self.dset.close_dataset)
         rospy.loginfo("Successfully loaded dataset.")
+        self.dset.set_tgrasp_mode() # TODO hacky way to reset index counters.
+        self.dset_iter = self.dset.iterator(
+            start = self.dset.get_current_model_index()) 
+        rospy.on_shutdown(self.dset.close_dataset)
         rospy.loginfo("Dataset location:\t%s" % dset_filepath)
         rospy.loginfo("Dataset config location:\t%s" % dset_config_filepath)
         if self.dset.get_current_model_name() != "":
@@ -191,16 +192,14 @@ class TableGraspDsetBuilder(object):
 
         rospy.loginfo("Finished setting up.")
 
-    def generateTableGraspsNextModel(self):
+    # Helper for genTGraspNextMod and genTGraspAllMod.s:
+    def generateTableGraspOneModel(self, data):
         rospy.wait_for_service("findTableGrasps")
         try: 
-            # Get next model's data from iterator. Convert to Grasp msg:
-            data = self.dset_iter.next()
-            model_name = data.model_name[0]
-            grasps = self.graspsFromArray(data.initial_grasp,
-                                          data.dof_value)
+            model_name = data.model_name
+            grasps = graspsFromArray(data.initial_grasp, data.dof_value)
 
-            rospy.loginfo("Generating table grasps for %s" % model_name)
+            rospy.loginfo("\tGenerating table grasps for %s" % model_name)
             if self.models_subdir is not None:
                 model_name = self.models_subdir + "/" + model_name
             ret = gc.findTableGrasps(grasps, self.hand_name, self.pregrasp_params, 
@@ -214,26 +213,32 @@ class TableGraspDsetBuilder(object):
             self.dset.add_table_grasps(ret.hand_poses, ret.body_poses, 
                                        ret.table_poses, is_new_model=True)
 
-    def graspsFromArray(self, grasps_array, dofs):
-        print grasps_array
-        print grasps_array.shape
-        print dofs
-        grasps = []
-        for i in xrange(len(grasps_array)):
-            g = Grasp()
-            if hasattr(g.dofs,'__iter__'):
-                g.dofs = dofs[i]
-            else:
-                g.dofs = dofs
-            p, q = g.pose.position, g.pose.orientation
-            q.w, q.x, q.y, q.z, p.x, p.y, p.z = tuple(grasps_array[i])
-            grasps.append(g)
-        return grasps
+    def generateTableGraspNextModel(self):
+        # Get next model's data from iterator. Convert to Grasp msg:
+        data = self.dset_iter.next()
+        self.generateTableGraspOneModel(data)
 
-    #TODO
-    def generateTableGraspsAllModels(self):
-        return
+    def generateTableGraspAllModels(self):
+        for model in self.dset_iter:
+            self.generateTableGraspOneModel(model)
 
+
+def graspsFromArray(grasps_array, dofs):
+    print "Creating Grasp object from array."
+    print grasps_array
+    print grasps_array.shape
+    print dofs
+    grasps = []
+    for i in xrange(len(grasps_array)):
+        g = Grasp()
+        if hasattr(g.dofs,'__iter__'):
+            g.dofs = dofs[i]
+        else:
+            g.dofs = dofs
+        p, q = g.pose.position, g.pose.orientation
+        q.w, q.x, q.y, q.z, p.x, p.y, p.z = tuple(grasps_array[i])
+        grasps.append(g)
+    return grasps
 
 if __name__ == "__main__":
     # Set up a dataset and generate initial_grasps for it:
@@ -246,6 +251,6 @@ if __name__ == "__main__":
 
     dset_builder = InitialGraspDsetBuilder(dset_filepath, config_filepath, hand_name, models_path = models_path)
 
-    dset_builder.generateGraspsAllModels()
+    dset_builder.generateGraspAllModels()
 
     

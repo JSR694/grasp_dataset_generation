@@ -78,6 +78,9 @@ class GraspDataset():
     def get_current_model_name(self):
         i = self.dset['current_model_index'][0]
         return self.dset['model_name'][i]
+
+    def get_current_model_index(self):
+        return self.dset['current_model_index'][0]
     
     # An additional dataset that can store useful metadata as its attributes.
     #  Example: storing directory information while building the dataset.
@@ -231,7 +234,16 @@ class GraspDataset():
 
     # TODO super hacky way to reset c_g_idx after adding init_grasps:
     def set_tgrasp_mode(self):
-        self.dset["current_grasp_index"][0]=0
+        print "Setting tgrasp mode."
+        if self.get_metadata("dset_mode") != "tgrasp":
+            # Change mode
+            self.set_metadata("dset_mode","tgrasp")
+            self.dset["current_model_index"][0] = 0 
+            self.dset["current_grasp_index"][0] = 0
+            self.dset["current_model_pose_index"][0] = 0
+        else:
+            print "Resuming table grasp generation."
+
     #TODO test add_table_grasps!
 
     # Add multiple table grasps for a single model.
@@ -288,21 +300,24 @@ class GraspDataset():
         idx = self.dset["current_model_pose_index"][0]
         for i in xrange(idx,num_modposes):
             self.dset["table_pose"][idx+i] = self.array_from_pose_msg(tposes[i])
+            print "Setting model pose %d" % (idx+i)
+            print self.array_from_pose_msg(obj_poses[i])
             self.dset["model_pose"][idx+i] = self.array_from_pose_msg(obj_poses[i])
 
         # Add grasps and grasp validity:
         mod_idx = self.dset["current_model_index"][0]
+        modpose_idx = self.dset["current_model_pose_index"][0]
         for modpose in tgrasps:
-            modpose_idx = self.dset["current_model_pose_index"][0]
             g_idx = self.dset["current_grasp_index"][0]
-            print "FIRST\tmod, g, modp:\t%d\t%d\t%d" % (mod_idx, g_idx, modpose_idx)
+            print "FIRST\tmod, modp, g:\t%d\t%d\t%d" % (mod_idx, modpose_idx, g_idx)
             for grasp in modpose.tgp:
                 pose_arry = self.array_from_pose_msg(grasp.pose)
                 self.dset["grasp_on_table"][mod_idx,g_idx,modpose_idx] = pose_arry
                 self.dset["is_valid_grasp"][mod_idx,g_idx,modpose_idx] = grasp.is_valid
                 g_idx+=1
-            print "LAST\tmod, g, modp:\t%d\t%d\t%d" % (mod_idx, g_idx, modpose_idx)
-            self.dset["current_model_pose_index"][0] += 1
+            print "LAST\tmod, modp, g:\t%d\t%d\t%d" % (mod_idx, modpose_idx, g_idx)
+            modpose_idx += 1
+        self.dset["current_model_pose_index"][0] = modpose_idx
         self.dset["current_grasp_index"][0] += num_grasps
         # TODO check consistency of current_xxxx_index.  Should give first UNASSIGNED index.
         # TODO loginfo for this function.
@@ -423,13 +438,14 @@ class GraspIterator():
         if self.current_index >= self.end_index:
             raise StopIteration()
 
+        next_grasps = None
         if self.table_grasps:
-            return self.dataset.get_table_grasp(self.current_index)
+            next_grasps = self.dataset.get_table_grasp(self.current_index)
         else:
-            return self.dataset.get_initial_grasp(self.current_index)
+            next_grasps = self.dataset.get_initial_grasp(self.current_index)
         self.current_index += 1
 
-        return grasp
+        return next_grasps 
 
 
 class RandomGraspIterator():
